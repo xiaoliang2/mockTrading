@@ -22,6 +22,34 @@ export interface Position {
   currentPrice: number;
 }
 
+export interface Transaction {
+  id: string;
+  type: 'buy' | 'sell';
+  stockCode: string;
+  stockName: string;
+  price: number;
+  quantity: number;
+  totalAmount: number;
+  feeRate: number;
+  feeAmount: number;
+  timestamp: Date;
+  userNote: string;
+  dateTag?: Date;
+}
+
+export interface PortfolioItem {
+  id?: string;
+  stockCode: string;
+  stockName: string;
+  quantity: number;
+  avgCost: number;
+  currentPrice: number;
+  marketValue: number;
+  profit: number;
+  profitPercent: number;
+  updatedAt?: Date;
+}
+
 export interface Trade {
   id: string;
   stockId: string;

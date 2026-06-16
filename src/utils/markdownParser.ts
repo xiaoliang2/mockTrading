@@ -6,7 +6,7 @@ export function parseMarkdownReport(content: string): Stock[] {
   // 按 ### 分割，每个 ### 开头的内容是一个股票
   const sections = content.split(/###\s+/).filter(s => s.trim().length > 0);
   
-  sections.forEach((section, idx) => {
+  sections.forEach((section) => {
     // 提取股票名称 - 在标题行中（第一行）
     const lines = section.split('\n');
     const titleLine = lines[0]?.trim() || '';
@@ -99,7 +99,7 @@ function parseWithFallback(content: string): Stock[] {
   // 匹配所有股票名称和代码
   const stockBlocks = content.split(/(?=###\s+[\u4e00-\u9fa5])/);
   
-  stockBlocks.forEach((block, idx) => {
+  stockBlocks.forEach((block) => {
     if (!block.trim()) return;
     
     const nameMatch = block.match(/名称[：:]*\s*([^\n-]+)/);
