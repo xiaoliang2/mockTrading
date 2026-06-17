@@ -46,25 +46,35 @@ export const stockAPI = {
   getByDate: () => apiClient.get('/stocks/by-date'),
   
   delete: (id) => apiClient.delete(`/stocks/${id}`),
+  
+  clearAll: () => apiClient.delete('/stocks'),
 };
 
 export const transactionAPI = {
   create: (transaction) => apiClient.post('/transactions', transaction),
-  
-  getAll: (params?: { date?: string; startDate?: string; endDate?: string }) => 
+
+  getAll: (params?: { date?: string; startDate?: string; endDate?: string }) =>
     apiClient.get('/transactions', { params }),
-  
+
   getByDate: () => apiClient.get('/transactions/by-date'),
+
+  clearAll: () => apiClient.delete('/transactions'),
 };
 
 export const portfolioAPI = {
   update: (data) => apiClient.post('/portfolio', data),
-  
+
   getAll: () => apiClient.get('/portfolio'),
-  
+
   updateQuantity: (stockCode, data) => apiClient.put(`/portfolio/${stockCode}`, data),
-  
+
   delete: (stockCode) => apiClient.delete(`/portfolio/${stockCode}`),
+
+  clearAll: async () => {
+    const portfolio = await apiClient.get('/portfolio');
+    const portfolioArray = Array.isArray(portfolio) ? portfolio : ((portfolio as any)?.data || []);
+    await Promise.all(portfolioArray.map((p: any) => apiClient.delete(`/portfolio/${p.stockCode}`)));
+  },
 };
 
 export const dailySnapshotAPI = {

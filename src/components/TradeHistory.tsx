@@ -40,15 +40,15 @@ export function TradeHistory() {
     });
   };
 
-  const filteredTrades = filterTransactionsByDate();
+  const filteredTrades = filterTransactionsByDate().slice(0, 10);
 
   const clearFilter = () => {
     setDateRange({ startDate: null, endDate: null });
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-4">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-4 rounded-t-xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <History className="w-5 h-5" />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Stock } from './types';
 import { Header } from './components/Header';
 import { StockList } from './components/StockList';
@@ -6,6 +6,7 @@ import { Portfolio } from './components/Portfolio';
 import { TradeHistory } from './components/TradeHistory';
 import { Settings } from './components/Settings';
 import { TradeModal } from './components/TradeModal';
+import { useTradingStore } from './store/tradingStore';
 import { PieChart, History, Settings as SettingsIcon } from 'lucide-react';
 
 type TabType = 'stocks' | 'portfolio' | 'history' | 'settings';
@@ -13,6 +14,11 @@ type TabType = 'stocks' | 'portfolio' | 'history' | 'settings';
 function App() {
   const [activeTab, setActiveTab] = useState<TabType>('stocks');
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
+  const loadFromServer = useTradingStore(state => state.loadFromServer);
+
+  useEffect(() => {
+    loadFromServer();
+  }, [loadFromServer]);
 
   const handleTrade = (stock: Stock) => {
     setSelectedStock(stock);

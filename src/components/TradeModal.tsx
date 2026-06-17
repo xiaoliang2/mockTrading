@@ -21,9 +21,9 @@ export function TradeModal({ stock, onClose }: TradeModalProps) {
 
   useEffect(() => {
     if (stock) {
-      setPrice(stock.recommendationPrice.toString());
+      setPrice(stock.recommendationPrice.toFixed(2));
       setQuantity('100');
-      setCustomFeeRate((feeRate * 100).toString());
+      setCustomFeeRate((feeRate * 100).toFixed(2));
       setTradeType(stock.recommendation === 'sell' || stock.recommendation === 'decrease' ? 'sell' : 'buy');
     }
   }, [stock, feeRate]);
@@ -48,7 +48,7 @@ export function TradeModal({ stock, onClose }: TradeModalProps) {
   const maxBuyQuantity = Math.floor(availableCash / (tradePrice * (1 + actualFeeRate)));
   const maxSellQuantity = position?.quantity || 0;
 
-  const handleTrade = () => {
+  const handleTrade = async () => {
     if (tradePrice <= 0 || tradeQuantity <= 0) {
       setMessage({ type: 'error', text: '请输入有效的价格和数量' });
       return;
@@ -60,13 +60,13 @@ export function TradeModal({ stock, onClose }: TradeModalProps) {
         setMessage({ type: 'error', text: '可用资金不足' });
         return;
       }
-      success = buyStock(stock.id, tradePrice, tradeQuantity, actualFeeRate);
+      success = await buyStock(stock.id, tradePrice, tradeQuantity, actualFeeRate);
     } else {
       if (tradeQuantity > maxSellQuantity) {
         setMessage({ type: 'error', text: '持仓数量不足' });
         return;
       }
-      success = sellStock(stock.id, tradePrice, tradeQuantity, actualFeeRate);
+      success = await sellStock(stock.id, tradePrice, tradeQuantity, actualFeeRate);
     }
 
     if (success) {
@@ -139,7 +139,14 @@ export function TradeModal({ stock, onClose }: TradeModalProps) {
               <input
                 type="number"
                 value={price}
-                onChange={(e) => setPrice(e.target.value)}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value);
+                  if (!isNaN(value)) {
+                    setPrice(value.toFixed(2));
+                  } else {
+                    setPrice('');
+                  }
+                }}
                 step="0.01"
                 className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm sm:text-base"
                 placeholder="请输入交易价格"

@@ -26,12 +26,43 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-mongoose.connect('mongodb://localhost:27017/mockTrading', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+const mongoUri = process.env.MONGO_URI || 'mongodb://admin:password@localhost:27017/mockTrading?authSource=admin';
+
+mongoose.connect(mongoUri, {
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
 })
-.then(() => console.log('MongoDB 连接成功'))
-.catch(err => console.error('MongoDB 连接失败:', err));
+.then(() => {
+  console.log('MongoDB 连接成功');
+  console.log('数据库:', mongoose.connection.name);
+  
+  // 在MongoDB连接成功后启动服务器
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`服务器运行在 http://0.0.0.0:${PORT}`);
+  });
+})
+.catch(err => {
+  console.error('MongoDB 连接失败:', err.message);
+  console.error('连接字符串:', mongoUri);
+  process.exit(1);
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB 连接错误:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('MongoDB 连接断开');
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('未捕获的异常:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('未处理的 Promise rejection:', reason);
+});
 
 const FileSchema = new mongoose.Schema({
   filename: String,
@@ -212,16 +243,25 @@ app.post('/api/stocks', async (req, res) => {
   try {
     const stocks = req.body.stocks;
     const dateTag = req.body.dateTag || new Date();
-    
+
     if (!Array.isArray(stocks)) {
       return res.status(400).json({ success: false, message: '数据格式错误' });
     }
 
+    // 解析日期字符串 - 使用UTC时间避免时区问题
+    let parsedDate;
+    if (typeof dateTag === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateTag)) {
+      const [year, month, day] = dateTag.split('-').map(Number);
+      parsedDate = new Date(Date.UTC(year, month - 1, day));
+    } else {
+      parsedDate = new Date(dateTag);
+    }
+
     const stocksWithDate = stocks.map(stock => ({
       ...stock,
-      dateTag: new Date(dateTag)
+      dateTag: parsedDate
     }));
-    
+
     const savedStocks = await Stock.insertMany(stocksWithDate);
     res.json({ success: true, count: savedStocks.length });
   } catch (err) {
@@ -233,21 +273,21 @@ app.get('/api/stocks', async (req, res) => {
   try {
     const { date, startDate, endDate, latest } = req.query;
     let query = {};
-    
+
     if (date) {
-      const targetDate = new Date(date);
-      targetDate.setHours(0, 0, 0, 0);
-      const nextDate = new Date(targetDate);
-      nextDate.setDate(nextDate.getDate() + 1);
+      // 解析本地时区的日期范围
+      const [year, month, day] = date.split('-').map(Number);
+      const targetDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+      const nextDate = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
       query = { dateTag: { $gte: targetDate, $lt: nextDate } };
     } else if (startDate && endDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      const [sy, sm, sd] = startDate.split('-').map(Number);
+      const [ey, em, ed] = endDate.split('-').map(Number);
+      const start = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
+      const end = new Date(ey, em - 1, ed, 23, 59, 59, 999);
       query = { dateTag: { $gte: start, $lte: end } };
     }
-    
+
     let stocks = await Stock.find(query).sort({ createdAt: -1 });
     
     if (latest === 'true') {
@@ -302,6 +342,15 @@ app.delete('/api/stocks/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: '股票不存在' });
     }
     res.json({ success: true, message: '删除成功' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/stocks', async (req, res) => {
+  try {
+    await Stock.deleteMany({});
+    res.json({ success: true, message: '所有股票已清除' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -374,6 +423,27 @@ app.get('/api/transactions/by-date', async (req, res) => {
     }));
     
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/transactions', async (req, res) => {
+  try {
+    await Transaction.deleteMany({});
+    res.json({ success: true, message: '清除所有交易记录成功' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/transactions/:id', async (req, res) => {
+  try {
+    const transaction = await Transaction.findByIdAndDelete(req.params.id);
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: '交易记录不存在' });
+    }
+    res.json({ success: true, message: '删除成功' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -604,8 +674,4 @@ app.get('/api/config', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`服务器运行在 http://localhost:${PORT}`);
 });

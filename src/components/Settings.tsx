@@ -1,29 +1,48 @@
 import { useState } from 'react';
 import { Settings as SettingsIcon, Percent, DollarSign, RotateCcw } from 'lucide-react';
 import { useTradingStore } from '../store/tradingStore';
-import { FileImporter } from './FileImporter';
 import { AIConfigPanel } from './AIConfig';
 import { Stock } from '../types';
+import { ConfirmDialog } from './ConfirmDialog';
 
 export function Settings() {
-  const { feeRate, availableCash, setFeeRate: updateFeeRate, setStocks, resetStocks, stocks } = useTradingStore();
+  const { feeRate, availableCash, availableFunds, setFeeRate: updateFeeRate, setAvailableFunds: updateAvailableFunds, resetStocks, stocks } = useTradingStore();
   const [customRate, setCustomRate] = useState((feeRate * 100).toString());
+  const [customFunds, setCustomFunds] = useState(String(availableCash || availableFunds || 0));
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+  const showSavedMessage = (msg: string) => {
+    setSavedMessage(msg);
+    setTimeout(() => setSavedMessage(null), 2000);
+  };
 
   const handleSave = () => {
     const rate = parseFloat(customRate) / 100;
     if (rate >= 0 && rate <= 1) {
       updateFeeRate(rate);
+      showSavedMessage('费率已保存到数据库');
+    } else {
+      alert('费率必须在 0-100% 之间');
     }
   };
 
-  const handleStocksImported = (newStocks: Stock[]) => {
-    setStocks(newStocks);
+  const handleSaveFunds = () => {
+    const funds = parseFloat(customFunds);
+    if (!isNaN(funds) && funds >= 0) {
+      updateAvailableFunds(funds);
+      showSavedMessage('资金已保存到数据库');
+    } else {
+      alert('请输入有效的资金金额');
+    }
   };
 
   const handleResetStocks = () => {
-    if (confirm('确定要重置股票列表吗？将恢复为默认的5只股票。')) {
-      resetStocks();
-    }
+    setIsConfirmOpen(true);
+  };
+
+  const handleConfirmReset = () => {
+    resetStocks();
   };
 
   return (
@@ -42,12 +61,25 @@ export function Settings() {
               <DollarSign className="w-5 h-5 text-blue-600" />
               <label className="font-medium text-gray-800">账户资金</label>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">可用资金</span>
-                <span className="font-semibold text-gray-900">¥{availableCash.toLocaleString()}</span>
-              </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-600 whitespace-nowrap">可用资金</span>
+              <input
+                type="number"
+                value={customFunds}
+                onChange={(e) => setCustomFunds(e.target.value)}
+                step="1000"
+                min="0"
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                placeholder="请输入资金金额"
+              />
+              <button
+                onClick={handleSaveFunds}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              >
+                保存
+              </button>
             </div>
+            <p className="text-xs text-gray-500 mt-2">提示：修改资金将同步保存到数据库，刷新页面后保留</p>
           </div>
 
           <div>
@@ -91,8 +123,6 @@ export function Settings() {
         </div>
       </div>
 
-      <FileImporter onStocksImported={handleStocksImported} />
-
       <AIConfigPanel />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -117,6 +147,23 @@ export function Settings() {
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        onConfirm={handleConfirmReset}
+        title="确认重置"
+        message="确定要重置股票列表吗？将恢复为默认的5只股票。"
+      />
+
+      {savedMessage && (
+        <div className="fixed bottom-6 right-6 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 z-50">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          <span>{savedMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -160,6 +160,16 @@ function parseWithFallback(content: string): Stock[] {
   return stocks;
 }
 
+export function parseMarkdownFile(content: string): Stock[] {
+  let stocks = parseMarkdownReport(content);
+  
+  if (stocks.length === 0) {
+    stocks = parseSimpleFormat(content);
+  }
+  
+  return stocks;
+}
+
 export function parseSimpleFormat(content: string): Stock[] {
   const stocks: Stock[] = [];
   const lines = content.split('\n');

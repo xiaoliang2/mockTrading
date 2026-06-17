@@ -1,4 +1,4 @@
-import { TrendingUp, Wallet, Percent } from 'lucide-react';
+import { TrendingUp, Wallet, Percent, FileText } from 'lucide-react';
 import { useTradingStore } from '../store/tradingStore';
 
 export function Header() {
@@ -36,6 +36,13 @@ export function Header() {
                   {stats.totalProfit >= 0 ? '+' : ''}¥{stats.totalProfit.toLocaleString()}
                   <span className="text-xs sm:text-sm ml-1 hidden sm:inline">({stats.totalProfitPercent >= 0 ? '+' : ''}{stats.totalProfitPercent.toFixed(2)}%)</span>
                 </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-white/10 rounded-lg px-3 sm:px-4 py-2">
+              <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+              <div>
+                <p className="text-xs text-blue-200">交易费用</p>
+                <p className="font-semibold text-sm sm:text-base">¥{stats.totalFees.toLocaleString()}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 bg-white/10 rounded-lg px-3 sm:px-4 py-2">

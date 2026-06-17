@@ -11,6 +11,7 @@ export interface Stock {
   position: number;
   targetPrice: number[];
   stopLoss: number;
+  date?: string;
 }
 
 export interface Position {

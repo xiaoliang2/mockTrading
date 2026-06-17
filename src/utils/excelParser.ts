@@ -1,273 +1,87 @@
 import { Stock } from '../types';
+import * as XLSX from 'xlsx';
 
 export async function parseExcelFile(file: File): Promise<Stock[]> {
   const stocks: Stock[] = [];
-  
+
   try {
     const data = await file.arrayBuffer();
-    const workbook = await readExcel(data);
-    
+    const workbook = XLSX.read(data, { type: 'array' });
+
     for (const sheetName of workbook.SheetNames) {
       const worksheet = workbook.Sheets[sheetName];
-      const jsonData = worksheetToJson(worksheet);
-      
-      if (jsonData.length > 0 && isStockData(jsonData)) {
-        const parsedStocks = parseStockData(jsonData);
-        stocks.push(...parsedStocks);
+      // 使用 header: 1 直接按行读取，第一行是列名
+      const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false });
+
+      if (rows.length < 2) continue;
+
+      console.log('Total rows:', rows.length);
+      console.log('Header row:', rows[0]);
+
+      // 跳过第一行（表头），从第二行开始
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length === 0) continue;
+
+        // 按列索引直接读取
+        const id = String(row[0] ?? '').trim();
+        const name = String(row[1] ?? '').trim();
+        const code = String(row[2] ?? '').trim();
+        const price = parseFloat(String(row[3] ?? '0')) || 0;
+        const recommendation = String(row[4] ?? 'hold').trim();
+        const confidence = parseInt(String(row[5] ?? '0')) || 0;
+        const pe = parseFloat(String(row[6] ?? '0')) || 0;
+        const dividend = parseFloat(String(row[7] ?? '0')) || 0;
+        const position = parseFloat(String(row[8] ?? '0')) || 0;
+        const rangeStr = String(row[9] ?? '').trim();
+        const stopLoss = parseFloat(String(row[10] ?? '0')) || 0;
+        const target1 = parseFloat(String(row[11] ?? '0')) || 0;
+        const target2 = parseFloat(String(row[12] ?? '0')) || 0;
+        const target3 = parseFloat(String(row[13] ?? '0')) || 0;
+        const industry = String(row[14] ?? '').trim();
+
+        if (!name || !code) continue;
+
+        const targetPrices: number[] = [];
+        if (target1 > 0) targetPrices.push(target1);
+        if (target2 > 0) targetPrices.push(target2);
+        if (target3 > 0) targetPrices.push(target3);
+
+        console.log(`Row ${i}: name=${name}, code=${code}, target1=${target1}, target2=${target2}, target3=${target3} -> ${JSON.stringify(targetPrices)}`);
+
+        let recPrice = price;
+        if (rangeStr && rangeStr.includes('-')) {
+          const parts = rangeStr.split('-').map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
+          if (parts.length >= 2) {
+            recPrice = (parts[0] + parts[1]) / 2;
+          }
+        } else if (rangeStr) {
+          recPrice = parseFloat(rangeStr) || price;
+        }
+
+        const validRec = ['buy', 'sell', 'hold', '增持', '减持', '买入', '卖出', '持有'];
+        const cleanRec = validRec.includes(recommendation) ? recommendation : 'hold';
+
+        stocks.push({
+          id: id || `${i}`,
+          name,
+          code: code.padStart(6, '0'),
+          price,
+          recommendation: cleanRec as Stock['recommendation'],
+          recommendationPrice: recPrice,
+          confidence,
+          pe,
+          dividend,
+          position,
+          targetPrice: targetPrices.slice(0, 3),
+          stopLoss,
+        });
       }
     }
   } catch (error) {
     console.error('Excel parsing error:', error);
     throw new Error('Excel文件解析失败，请确保文件格式正确');
   }
-  
+
   return stocks;
-}
-
-async function readExcel(data: ArrayBuffer): Promise<{ SheetNames: string[]; Sheets: Record<string, any> }> {
-  // 简化版本：使用 XLSX 库解析
-  // @ts-ignore
-  if (typeof XLSX !== 'undefined') {
-    // @ts-ignore
-    return XLSX.read(data, { type: 'array' });
-  }
-  
-  // 备用：尝试使用原生方式解析（简化版，仅支持基本格式）
-  return parseExcelFallback(data);
-}
-
-function parseExcelFallback(data: ArrayBuffer): { SheetNames: string[]; Sheets: Record<string, any> } {
-  const decoder = new TextDecoder('utf-8');
-  const text = decoder.decode(data);
-  
-  if (text.includes('<?xml') || text.includes('xl/')) {
-    return parseXlsxXml(text);
-  }
-  
-  return parseCsv(text);
-}
-
-function parseXlsxXml(text: string): { SheetNames: string[]; Sheets: Record<string, any> } {
-  const sheetNames: string[] = [];
-  const sheets: Record<string, any> = {};
-  
-  const sheetNameRegex = /<sheet name="([^"]+)"[^>]*\/>/g;
-  let match;
-  while ((match = sheetNameRegex.exec(text)) !== null) {
-    sheetNames.push(match[1]);
-  }
-  
-  sheetNames.forEach(name => {
-    sheets[name] = { '!ref': 'A1:Z100' };
-  });
-  
-  return { SheetNames: sheetNames, Sheets: sheets };
-}
-
-function parseCsv(text: string): { SheetNames: string[]; Sheets: Record<string, any> } {
-  const lines = text.split('\n').filter(line => line.trim());
-  if (lines.length === 0) {
-    return { SheetNames: ['Sheet1'], Sheets: { Sheet1: {} } };
-  }
-  
-  const headers = lines[0].split(',').map(h => h.trim());
-  const rows: any[] = [];
-  
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
-    const row: any = {};
-    headers.forEach((header, idx) => {
-      row[header] = values[idx]?.trim() || '';
-    });
-    rows.push(row);
-  }
-  
-  return {
-    SheetNames: ['Sheet1'],
-    Sheets: {
-      Sheet1: {
-        '!ref': `A1:${String.fromCharCode(65 + headers.length - 1)}${lines.length}`,
-        _data: rows
-      }
-    }
-  };
-}
-
-function worksheetToJson(worksheet: any): any[] {
-  if (worksheet._data) {
-    return worksheet._data;
-  }
-  
-  const result: any[] = [];
-  const range = worksheet['!ref'];
-  if (!range) return result;
-  
-  const [, startCol, startRow, endCol, endRow] = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/) || [];
-  
-  if (!startCol || !endCol || !startRow || !endRow) {
-    return guessWorksheetData(worksheet);
-  }
-  
-  const headers: string[] = [];
-  const startColNum = colToNum(startCol);
-  const endColNum = colToNum(endCol);
-  const startRowNum = parseInt(startRow);
-  const endRowNum = parseInt(endRow);
-  
-  for (let col = startColNum; col <= endColNum; col++) {
-    const cell = worksheet[`${numToCol(col)}${startRowNum}`];
-    headers.push(cell ? (cell.v || cell.w || '') : '');
-  }
-  
-  for (let row = startRowNum + 1; row <= endRowNum; row++) {
-    const rowData: any = {};
-    for (let col = startColNum; col <= endColNum; col++) {
-      const cell = worksheet[`${numToCol(col)}${row}`];
-      rowData[headers[col - startColNum]] = cell ? (cell.v || cell.w || '') : '';
-    }
-    if (Object.values(rowData).some(v => v && v.toString().trim())) {
-      result.push(rowData);
-    }
-  }
-  
-  return result;
-}
-
-function guessWorksheetData(worksheet: any): any[] {
-  const result: any[] = [];
-  const cells = Object.keys(worksheet).filter(k => k.match(/^[A-Z]+\d+$/));
-  
-  if (cells.length === 0) return result;
-  
-  const rows = new Set(cells.map(c => parseInt(c.match(/\d+/)?.[0] || '0')));
-  const cols = new Set(cells.map(c => c.match(/^[A-Z]+/)?.[0] || ''));
-  
-  const rowArray = Array.from(rows).sort((a, b) => a - b);
-  const colArray = Array.from(cols).sort();
-  
-  const headers: string[] = [];
-  const firstRow = rowArray[0];
-  colArray.forEach(col => {
-    const cell = worksheet[`${col}${firstRow}`];
-    headers.push(cell ? (cell.v || cell.w || col) : col);
-  });
-  
-  for (let i = 1; i < rowArray.length; i++) {
-    const rowData: any = {};
-    colArray.forEach((col, idx) => {
-      const cell = worksheet[`${col}${rowArray[i]}`];
-      rowData[headers[idx]] = cell ? (cell.v || cell.w || '') : '';
-    });
-    if (Object.values(rowData).some(v => v && v.toString().trim())) {
-      result.push(rowData);
-    }
-  }
-  
-  return result;
-}
-
-function colToNum(col: string): number {
-  let num = 0;
-  for (let i = 0; i < col.length; i++) {
-    num = num * 26 + (col.charCodeAt(i) - 64);
-  }
-  return num;
-}
-
-function numToCol(num: number): string {
-  let col = '';
-  while (num > 0) {
-    num--;
-    col = String.fromCharCode(65 + (num % 26)) + col;
-    num = Math.floor(num / 26);
-  }
-  return col;
-}
-
-function isStockData(data: any[]): boolean {
-  if (data.length === 0) return false;
-  
-  const firstRow = data[0];
-  const keys = Object.keys(firstRow).map(k => k.toLowerCase());
-  
-  const stockKeys = ['名称', '代码', '股票', 'stock', 'code', 'name'];
-  return stockKeys.some(key => keys.includes(key) || keys.some(k => k.includes(key)));
-}
-
-function parseStockData(data: any[]): Stock[] {
-  const stocks: Stock[] = [];
-  
-  data.forEach((row, idx) => {
-    const name = findValue(row, ['名称', '股票名称', '股票', 'name', 'stock', '证券名称']);
-    const code = findValue(row, ['代码', '股票代码', '证券代码', 'code', 'stockcode', 'stock_code']);
-    
-    if (!name || !code) return;
-    
-    const price = parseFloat(findValue(row, ['最新股价', '价格', '现价', 'currentprice', 'price', '最新价']) || '0');
-    const recommendation = findValue(row, ['研判评级', '评级', '建议', 'recommendation', 'rating']) || 'hold';
-    const confidence = parseInt(findValue(row, ['置信度', 'confidence', 'score']) || '0');
-    const pe = parseFloat(findValue(row, ['PE', '市盈率', 'pe', 'ttm', 'pettm']) || '0');
-    const dividend = parseFloat(findValue(row, ['股息率', '股息', 'dividend', 'yield']) || '0');
-    const position = parseFloat(findValue(row, ['建议仓位', '仓位', 'position', 'weight']) || '0');
-    const stopLoss = parseFloat(findValue(row, ['止损位', '止损', 'stoploss', 'stop_loss']) || '0');
-    const rangeStr = findValue(row, ['建仓区间', '区间', 'range', 'buyrange']);
-    const targetStr = findValue(row, ['目标价', '目标', 'target', 'targetprice']);
-    
-    let recPrice = price;
-    if (rangeStr) {
-      if (rangeStr.includes('-')) {
-        const parts = rangeStr.split('-').map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
-        if (parts.length >= 2) {
-          recPrice = (parts[0] + parts[1]) / 2;
-        }
-      } else {
-        recPrice = parseFloat(rangeStr) || price;
-      }
-    }
-    
-    const targetPrices: number[] = [];
-    if (targetStr) {
-      const priceMatches = targetStr.match(/[\d.]+/g);
-      if (priceMatches) {
-        priceMatches.forEach(p => {
-          const val = parseFloat(p);
-          if (!isNaN(val) && val > 0) targetPrices.push(val);
-        });
-      }
-    }
-    
-    const validRec = ['buy', 'sell', 'hold', '增持', '减持', '买入', '卖出', '持有'];
-    const cleanRec = validRec.includes(recommendation) ? recommendation : 'hold';
-    
-    stocks.push({
-      id: `${idx + 1}`,
-      name: name.trim(),
-      code: code.toString().padStart(6, '0'),
-      price,
-      recommendation: cleanRec as Stock['recommendation'],
-      recommendationPrice: recPrice,
-      confidence,
-      pe,
-      dividend,
-      position,
-      targetPrice: targetPrices.slice(0, 3),
-      stopLoss,
-    });
-  });
-  
-  return stocks;
-}
-
-function findValue(row: any, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const foundKey = Object.keys(row).find(k => 
-      k.toLowerCase() === key.toLowerCase() || 
-      k.toLowerCase().includes(key.toLowerCase())
-    );
-    if (foundKey) {
-      const val = row[foundKey];
-      return val !== undefined && val !== null ? val.toString() : undefined;
-    }
-  }
-  return undefined;
 }

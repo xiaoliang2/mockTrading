@@ -16,11 +16,13 @@ interface TradingState {
   addStock: (stock: Stock) => void;
   removeStock: (id: string) => void;
   updateStock: (id: string, updates: Partial<Stock>) => void;
+  resetStocks: () => void;
   
   addTransaction: (transaction: Transaction) => void;
   
   updatePortfolio: (item: PortfolioItem) => void;
   removeFromPortfolio: (stockCode: string) => void;
+  resetPortfolio: () => void;
   
   setAvailableFunds: (funds: number) => void;
   setFeeRate: (rate: number) => void;
@@ -28,8 +30,8 @@ interface TradingState {
   loadFromServer: () => Promise<void>;
   saveToServer: () => Promise<void>;
   
-  buyStock: (stock: Stock, price: number, quantity: number) => boolean;
-  sellStock: (stock: Stock, price: number, quantity: number) => boolean;
+  buyStock: (stockId: string, price: number, quantity: number, feeRateParam?: number) => Promise<boolean>;
+  sellStock: (stockId: string, price: number, quantity: number, feeRateParam?: number) => Promise<boolean>;
   
   setError: (error: string | null) => void;
   setLoading: (loading: boolean) => void;
@@ -41,6 +43,10 @@ interface TradingState {
     totalProfitPercent: number;
     portfolioValue: number;
   };
+  
+  getPosition: (stockId: string) => PortfolioItem | undefined;
+  positions: PortfolioItem[];
+  availableCash: number;
 }
 
 const initialStocks: Stock[] = [
@@ -160,9 +166,15 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     portfolio: state.portfolio.filter(p => p.stockCode !== stockCode)
   })),
   
-  setAvailableFunds: (funds) => set({ availableFunds: funds }),
-  
-  setFeeRate: (rate) => set({ feeRate: rate }),
+  setAvailableFunds: (funds) => {
+    set({ availableFunds: funds });
+    configAPI.set('availableFunds', funds).catch(err => console.error('保存可用资金失败:', err));
+  },
+
+  setFeeRate: (rate) => {
+    set({ feeRate: rate });
+    configAPI.set('feeRate', rate).catch(err => console.error('保存费率失败:', err));
+  },
   
   setError: (error) => set({ error }),
   
@@ -189,7 +201,26 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       const config = ((configData as any)?.success === false) ? null : ((configData as any)?.configs || configData);
       
       if (stocks && stocks.length > 0) {
-        set({ stocks: stocks.map((s: any) => ({ ...s, id: String(s._id || s.id) })) });
+        const formattedStocks = stocks.map((s: any) => {
+          const dateTag = s.dateTag || s.date;
+          let date = dateTag;
+          if (dateTag && typeof dateTag === 'string') {
+            if (dateTag.includes('T')) {
+              date = dateTag.split('T')[0];
+            } else if (!/^\d{4}-\d{2}-\d{2}$/.test(dateTag)) {
+              const d = new Date(dateTag);
+              date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+          }
+          return { 
+            ...s, 
+            id: String(s._id || s.id),
+            date: date 
+          };
+        });
+        set({ stocks: formattedStocks });
+      } else {
+        set({ stocks: [] });
       }
       if (transactions && transactions.length > 0) {
         set({ transactions: transactions.map((t: any) => ({ ...t, id: String(t._id || t.id) })) });
@@ -239,10 +270,16 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     }
   },
 
-  buyStock: (stock, price, quantity) => {
-    const { availableFunds, feeRate } = get();
+  buyStock: async (stockId, price, quantity, feeRateParam) => {
+    const { stocks, availableFunds, feeRate: defaultFeeRate } = get();
+    const stock = stocks.find(s => s.id === stockId);
+    if (!stock) {
+      get().setError('股票不存在');
+      return false;
+    }
+    const actualFeeRate = feeRateParam !== undefined ? feeRateParam : defaultFeeRate;
     const totalCost = price * quantity;
-    const fee = totalCost * (feeRate / 100);
+    const fee = totalCost * actualFeeRate;
     const totalWithFee = totalCost + fee;
 
     if (totalWithFee > availableFunds) {
@@ -258,7 +295,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       price,
       quantity,
       totalAmount: totalCost,
-      feeRate,
+      feeRate: actualFeeRate,
       feeAmount: fee,
       timestamp: new Date(),
       userNote: '',
@@ -275,6 +312,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       const totalQuantity = existingPosition.quantity + quantity;
       newPosition = {
         ...existingPosition,
+        id: existingPosition.id,
         quantity: totalQuantity,
         avgCost: totalCostBasis / totalQuantity,
         currentPrice: stock.price,
@@ -284,6 +322,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       };
     } else {
       newPosition = {
+        id: `${stock.code}-${Date.now()}`,
         stockCode: stock.code,
         stockName: stock.name,
         quantity,
@@ -297,11 +336,26 @@ export const useTradingStore = create<TradingState>((set, get) => ({
 
     get().updatePortfolio(newPosition);
     get().setError(null);
+
+    // 保存到 MongoDB
+    try {
+      await transactionAPI.create(transaction);
+      await portfolioAPI.update(newPosition);
+    } catch (error) {
+      console.error('保存到数据库失败:', error);
+    }
+
     return true;
   },
 
-  sellStock: (stock, price, quantity) => {
-    const { feeRate, portfolio } = get();
+  sellStock: async (stockId, price, quantity, feeRateParam) => {
+    const { stocks, feeRate: defaultFeeRate, portfolio } = get();
+    const stock = stocks.find(s => s.id === stockId);
+    if (!stock) {
+      get().setError('股票不存在');
+      return false;
+    }
+    const actualFeeRate = feeRateParam !== undefined ? feeRateParam : defaultFeeRate;
     const position = portfolio.find(p => p.stockCode === stock.code);
 
     if (!position || position.quantity < quantity) {
@@ -310,7 +364,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     }
 
     const totalValue = price * quantity;
-    const fee = totalValue * (feeRate / 100);
+    const fee = totalValue * actualFeeRate;
     const netProceeds = totalValue - fee;
 
     const transaction: Transaction = {
@@ -321,7 +375,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       price,
       quantity,
       totalAmount: totalValue,
-      feeRate,
+      feeRate: actualFeeRate,
       feeAmount: fee,
       timestamp: new Date(),
       userNote: '',
@@ -347,15 +401,31 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     }
 
     get().setError(null);
+
+    // 保存到 MongoDB
+    try {
+      await transactionAPI.create(transaction);
+    } catch (error) {
+      console.error('保存交易记录失败:', error);
+    }
+
     return true;
   },
 
   getStats: () => {
-    const { portfolio, availableFunds, initialCapital } = get();
-    const portfolioValue = portfolio.reduce((sum, item) => sum + item.marketValue, 0);
+    const { portfolio, availableFunds, initialCapital, stocks, transactions } = get();
+    
+    const portfolioValue = portfolio.reduce((sum, item) => {
+      const stockRecords = stocks.filter(s => s.code === item.stockCode);
+      const latestStock = stockRecords.sort((a, b) => new Date(b.dateTag).getTime() - new Date(a.dateTag).getTime())[0];
+      const currentPrice = latestStock?.price || item.currentPrice;
+      return sum + currentPrice * item.quantity;
+    }, 0);
+    
     const totalAssets = availableFunds + portfolioValue;
     const totalProfit = totalAssets - initialCapital;
     const totalProfitPercent = initialCapital > 0 ? (totalProfit / initialCapital) * 100 : 0;
+    const totalFees = transactions.reduce((sum, t) => sum + (t.feeAmount || 0), 0);
     
     return {
       initialCapital,
@@ -363,6 +433,43 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       totalProfit,
       totalProfitPercent,
       portfolioValue,
+      totalFees,
     };
   },
+  
+  getPosition: (stockId: string) => {
+    const { portfolio, stocks } = get();
+    const stock = stocks.find(s => s.id === stockId);
+    if (!stock) return undefined;
+    return portfolio.find(p => p.stockCode === stock.code);
+  },
+  
+  resetStocks: async () => {
+    try {
+      await stockAPI.clearAll();
+    } catch (error) {
+      console.error('清除数据库股票数据失败:', error);
+    }
+    set({ stocks: [] });
+  },
+  
+  resetPortfolio: async () => {
+    const { initialCapital } = get();
+
+    // 清除数据库中的持仓和交易记录
+    try {
+      await portfolioAPI.clearAll();
+      await transactionAPI.clearAll();
+      await configAPI.set('availableFunds', initialCapital);
+    } catch (error) {
+      console.error('清除数据库失败:', error);
+    }
+
+    // 清除本地状态
+    set({ portfolio: [], transactions: [], availableFunds: initialCapital });
+  },
+  
+  positions: [],
+  
+  availableCash: 1000000,
 }));

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface DateRange {
@@ -6,27 +6,52 @@ interface DateRange {
   endDate: Date | null;
 }
 
-interface DatePickerProps {
+interface SingleDate {
+  date: Date | null;
+}
+
+type DatePickerProps = {
   selectedRange: DateRange;
   onChange: (range: DateRange) => void;
   showPresets?: boolean;
-}
+} | {
+  selectedDate: SingleDate;
+  onChange: (value: SingleDate) => void;
+  showPresets?: boolean;
+};
 
-export function DatePicker({ selectedRange, onChange, showPresets = true }: DatePickerProps) {
+export function DatePicker(props: DatePickerProps) {
+  const { showPresets = true } = props;
+  const isRangeMode = 'selectedRange' in props;
   const [isOpen, setIsOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const { startDate, endDate } = selectedRange;
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  const startDate = isRangeMode ? props.selectedRange.startDate : props.selectedDate.date;
+  const endDate = isRangeMode ? props.selectedRange.endDate : null;
 
   useEffect(() => {
     if (isOpen) {
       const handleClickOutside = (e: MouseEvent) => {
         const target = e.target as HTMLElement;
-        if (!target.closest('.date-picker-container')) {
+        if (!target.closest('.date-picker-container') && !target.closest('.date-picker-popup')) {
           setIsOpen(false);
         }
       };
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setPosition({
+        top: rect.bottom + window.scrollY + 8,
+        left: rect.left + window.scrollX,
+      });
     }
   }, [isOpen]);
 
@@ -45,21 +70,21 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const days: Date[] = [];
-    
+
     for (let i = 0; i < firstDay.getDay(); i++) {
       const prevDate = new Date(year, month, -i);
       days.push(prevDate);
     }
-    
+
     for (let i = 1; i <= lastDay.getDate(); i++) {
       days.push(new Date(year, month, i));
     }
-    
+
     const remainingDays = 42 - days.length;
     for (let i = 1; i <= remainingDays; i++) {
       days.push(new Date(year, month + 1, i));
     }
-    
+
     return days;
   };
 
@@ -70,19 +95,24 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
 
   const isInRange = (date: Date): boolean => {
     if (!startDate || !endDate) return false;
-    return date >= new Date(startDate.toDateString()) && 
+    return date >= new Date(startDate.toDateString()) &&
            date <= new Date(endDate.toDateString());
   };
 
   const handleDateClick = (date: Date) => {
     const dateStr = date.toDateString();
-    
+    if (!isRangeMode) {
+      props.onChange({ date: new Date(dateStr) });
+      setIsOpen(false);
+      return;
+    }
     if (!startDate || (startDate && endDate)) {
-      onChange({ startDate: new Date(dateStr), endDate: null });
+      props.onChange({ startDate: new Date(dateStr), endDate: null });
     } else if (date < startDate) {
-      onChange({ startDate: new Date(dateStr), endDate: startDate });
+      props.onChange({ startDate: new Date(dateStr), endDate: startDate });
     } else {
-      onChange({ startDate, endDate: new Date(dateStr) });
+      props.onChange({ startDate, endDate: new Date(dateStr) });
+      setIsOpen(false);
     }
   };
 
@@ -90,7 +120,29 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
-    onChange({ startDate, endDate });
+    if (isRangeMode) {
+      props.onChange({ startDate, endDate });
+    } else {
+      props.onChange({ date: startDate });
+    }
+    setIsOpen(false);
+  };
+
+  const handleToday = () => {
+    if (isRangeMode) {
+      props.onChange({ startDate: new Date(), endDate: new Date() });
+    } else {
+      props.onChange({ date: new Date() });
+    }
+    setIsOpen(false);
+  };
+
+  const handleClear = () => {
+    if (isRangeMode) {
+      props.onChange({ startDate: null, endDate: null });
+    } else {
+      props.onChange({ date: null });
+    }
     setIsOpen(false);
   };
 
@@ -112,6 +164,7 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
   return (
     <div className="date-picker-container inline-block relative">
       <button
+        ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
       >
@@ -124,29 +177,58 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
       </button>
 
       {showPresets && isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-lg border border-gray-100 p-3 z-50">
+        <div
+          ref={popupRef}
+          className="fixed bg-white rounded-lg shadow-2xl border border-gray-200 p-4 date-picker-popup"
+          style={{
+            top: `${position.top}px`,
+            left: `${position.left}px`,
+            zIndex: 99999,
+            minWidth: '300px',
+          }}
+        >
           <div className="flex gap-2 mb-3">
-            <button
-              onClick={() => handlePreset(7)}
-              className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-            >
-              近7天
-            </button>
-            <button
-              onClick={() => handlePreset(30)}
-              className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-            >
-              近30天
-            </button>
-            <button
-              onClick={() => handlePreset(90)}
-              className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-            >
-              近90天
-            </button>
+            {isRangeMode && (
+              <>
+                <button
+                  onClick={() => handlePreset(7)}
+                  className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                >
+                  近7天
+                </button>
+                <button
+                  onClick={() => handlePreset(30)}
+                  className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                >
+                  近30天
+                </button>
+                <button
+                  onClick={() => handlePreset(90)}
+                  className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                >
+                  近90天
+                </button>
+              </>
+            )}
+            {!isRangeMode && (
+              <>
+                <button
+                  onClick={handleToday}
+                  className="flex-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                >
+                  今天
+                </button>
+                <button
+                  onClick={handleClear}
+                  className="flex-1 px-3 py-1.5 text-xs bg-gray-50 text-gray-600 rounded hover:bg-gray-100 transition-colors"
+                >
+                  清除
+                </button>
+              </>
+            )}
           </div>
 
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-3">
             <button
               onClick={prevMonth}
               className="p-1 hover:bg-gray-100 rounded"
@@ -164,7 +246,7 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1 min-w-[280px]">
             {weekdays.map((day) => (
               <div key={day} className="text-xs text-center text-gray-400 py-1">
                 {day}
@@ -178,7 +260,7 @@ export function DatePicker({ selectedRange, onChange, showPresets = true }: Date
               const isStart = isSameDate(date, startDate);
               const isEnd = isSameDate(date, endDate);
 
-              let className = 'py-1.5 text-sm text-center rounded cursor-pointer transition-colors';
+              let className = 'py-2 text-sm text-center rounded cursor-pointer transition-colors';
               if (!isCurrentMonth) {
                 className += ' text-gray-300';
               } else if (isSelected) {
